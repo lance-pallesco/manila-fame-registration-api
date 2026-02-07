@@ -1,36 +1,40 @@
-# Manila FAME Registration API
+# Manila FAME Registration - Backend
 
-Laravel API backend for the Manila FAME multi-step registration system.
+Laravel API backend for the Manila FAME 2026 multi-step event registration system.
 
-## Requirements
+## Tech Stack
 
+- Laravel 12
 - PHP 8.2+
+- MySQL
+
+## Prerequisites
+
+- PHP 8.2 or higher
 - Composer
 - MySQL 8.0+
-- Node.js (for frontend assets, optional)
+- Laravel CLI (optional)
+- Frontend Vue app (see [Frontend README](../multi-step-registration-ui/README.md))
 
-## Installation
+## Getting Started
 
-### 1. Clone and Install Dependencies
+### 1. Install Dependencies
 
 ```bash
-cd multi-step-registration-api
+cd manila-fame-registration-api
 composer install
 ```
 
-### 2. Environment Setup
+### 2. Configure Environment
 
 ```bash
-# Copy environment file
 cp .env.example .env
-
-# Generate application key
 php artisan key:generate
 ```
 
-### 3. Configure Database
+### 3. Set Up Database
 
-Edit `.env` and set your database credentials:
+Open `.env` and set your MySQL credentials:
 
 ```env
 DB_CONNECTION=mysql
@@ -41,25 +45,35 @@ DB_USERNAME=root
 DB_PASSWORD=your_password
 ```
 
-Create the database:
+Then create the database and run migrations:
 
 ```sql
 CREATE DATABASE manila_fame_registration;
 ```
 
-### 4. Run Migrations
-
 ```bash
 php artisan migrate
 ```
 
-### 5. Create Storage Link
+### 4. Set Up File Storage
 
-This enables public access to uploaded brochures:
+Create the symbolic link so uploaded brochures are publicly accessible:
 
 ```bash
 php artisan storage:link
 ```
+
+Brochures are stored in `storage/app/public/brochures/` and served from `/storage/brochures/`.
+
+### 5. Configure CORS
+
+The frontend URL is set in `.env`:
+
+```env
+FRONTEND_URL=http://localhost:5173
+```
+
+Additional allowed origins can be edited in `config/cors.php`.
 
 ### 6. Start the Server
 
@@ -73,31 +87,45 @@ The API will be available at `http://localhost:8000`.
 
 ### POST /api/register
 
-Register a new user with company information.
+Registers a new user with company information in a single request.
 
 **Content-Type:** `multipart/form-data`
 
 #### Request Fields
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `account_info[first_name]` | string | Yes | User's first name |
-| `account_info[last_name]` | string | Yes | User's last name |
-| `account_info[email]` | string | Yes | Email address (unique) |
-| `account_info[username]` | string | Yes | Username (alphanumeric, unique) |
-| `account_info[password]` | string | Yes | Password (min 8 chars) |
-| `account_info[password_confirmation]` | string | Yes | Password confirmation |
-| `account_info[participation_type]` | string | Yes | Buyer, Exhibitor, or Visitor |
-| `company_info[company_name]` | string | Yes | Company name |
-| `company_info[address_line]` | string | Yes | Company address |
-| `company_info[city]` | string | Yes | City |
-| `company_info[region]` | string | Yes | Region/State |
-| `company_info[country]` | string | Yes | Country |
-| `company_info[year_established]` | integer | Yes | 4-digit year (1800-current) |
-| `company_info[website]` | string | No | Company website URL |
-| `brochure` | file | No | PDF, DOC, or DOCX (max 2MB) |
+**Account Information (required):**
 
-#### Success Response (201)
+| Field | Type | Rules |
+|-------|------|-------|
+| `account_info[first_name]` | string | Required, max 255 |
+| `account_info[last_name]` | string | Required, max 255 |
+| `account_info[email]` | string | Required, valid email, unique |
+| `account_info[username]` | string | Required, alphanumeric/dash/underscore, min 3, unique |
+| `account_info[password]` | string | Required, min 8 characters, must match confirmation |
+| `account_info[password_confirmation]` | string | Required |
+| `account_info[participation_type]` | string | Required, one of: Buyer, Exhibitor, Visitor |
+
+**Company Information (required):**
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `company_info[company_name]` | string | Required, max 255 |
+| `company_info[address_line]` | string | Required, max 500 |
+| `company_info[city]` | string | Required, max 255 |
+| `company_info[region]` | string | Optional, max 255 |
+| `company_info[country]` | string | Required, max 255 |
+| `company_info[year_established]` | integer | Required, 4 digits, 1800 to current year |
+| `company_info[website]` | string | Optional, valid URL |
+
+**File Upload (optional):**
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `brochure` | file | PDF, DOC, or DOCX, max 2MB |
+
+#### Responses
+
+**201 Created** -- Registration successful:
 
 ```json
 {
@@ -106,7 +134,7 @@ Register a new user with company information.
 }
 ```
 
-#### Validation Error Response (422)
+**422 Unprocessable Entity** -- Validation errors:
 
 ```json
 {
@@ -118,7 +146,7 @@ Register a new user with company information.
 }
 ```
 
-#### Server Error Response (500)
+**500 Internal Server Error** -- Server failure:
 
 ```json
 {
@@ -127,6 +155,37 @@ Register a new user with company information.
 }
 ```
 
+## Architecture
+
+This API follows clean architecture principles with thin controllers:
+
+```
+Request
+  |
+  v
+RegisterController        <-- Thin: receives request, returns response
+  |
+  v
+RegisterRequest           <-- Validation: all rules defined here
+  |
+  v
+RegisterService           <-- Business logic: wrapped in DB::transaction()
+  |
+  +--> User::create()     <-- Creates user with hashed password
+  +--> Company::create()  <-- Creates company linked to user
+  +--> Storage::put()     <-- Stores brochure file (if provided)
+  |
+  v
+JSON Response
+```
+
+**Key principles:**
+- Controllers only handle HTTP concerns
+- Form Requests handle all validation
+- Services contain business logic
+- All database operations wrapped in `DB::transaction()` for atomicity
+- File uploads use `Storage::disk('public')`
+
 ## Project Structure
 
 ```
@@ -134,96 +193,64 @@ app/
 ├── Http/
 │   ├── Controllers/
 │   │   └── Api/
-│   │       └── RegisterController.php   # Thin controller
+│   │       └── RegisterController.php    # Single-action controller (__invoke)
 │   └── Requests/
-│       └── RegisterRequest.php          # Validation rules
+│       └── RegisterRequest.php           # All validation rules & messages
 ├── Models/
-│   ├── User.php                         # User model
-│   └── Company.php                      # Company model
+│   ├── User.php                          # User model (hasOne Company)
+│   └── Company.php                       # Company model (belongsTo User)
 └── Services/
-    └── RegisterService.php              # Business logic
+    └── RegisterService.php               # Registration business logic
 
-database/
-└── migrations/
-    ├── 0001_01_01_000000_create_users_table.php
-    └── 0001_01_01_000003_create_companies_table.php
+database/migrations/
+├── 0001_01_01_000000_create_users_table.php
+└── 0001_01_01_000003_create_companies_table.php
 
 routes/
-└── api.php                              # API routes
+└── api.php                               # POST /api/register
 
 config/
-└── cors.php                             # CORS configuration
+└── cors.php                              # CORS settings for Vue SPA
 ```
 
-## Architecture
+## Database Schema
 
-This API follows clean architecture principles:
+**users**
 
-- **Controllers** are thin and only handle HTTP concerns
-- **Form Requests** handle validation
-- **Services** contain business logic
-- **Models** handle database operations
-- **DB Transactions** ensure data consistency
+| Column | Type | Notes |
+|--------|------|-------|
+| id | bigint | Primary key |
+| first_name | string | |
+| last_name | string | |
+| email | string | Unique |
+| username | string | Unique |
+| password | string | Hashed automatically |
+| participation_type | enum | Buyer, Exhibitor, Visitor |
+| created_at | timestamp | |
+| updated_at | timestamp | |
 
-### Data Flow
+**companies**
 
-```
-Request → Controller → FormRequest (validation)
-                    ↓
-              RegisterService
-                    ↓
-         DB::transaction()
-                    ↓
-    User::create() → Company::create() → Storage::put()
-                    ↓
-              Response (JSON)
-```
+| Column | Type | Notes |
+|--------|------|-------|
+| id | bigint | Primary key |
+| user_id | bigint | Foreign key to users |
+| company_name | string | |
+| address | string | |
+| city | string | |
+| region | string | Nullable |
+| country | string | |
+| year_established | year | |
+| website | string | Nullable |
+| brochure_path | string | Nullable, relative path |
+| created_at | timestamp | |
+| updated_at | timestamp | |
 
-## Frontend Integration
+## Connecting to the Frontend
 
-The Vue SPA frontend should:
+| Backend | Frontend (.env) |
+|---------|-----------------|
+| `php artisan serve` (port 8000) | `VITE_API_BASE_URL=http://localhost:8000/api` |
+| CORS allows `http://localhost:5173` | `npm run dev` (port 5173) |
 
-1. Set `VITE_API_BASE_URL=http://localhost:8000` in `.env`
-2. Set `USE_MOCK = false` in `registrationService.js`
-3. Submit data as `multipart/form-data` with nested field names
-
-Example FormData construction:
-
-```javascript
-const formData = new FormData();
-formData.append('account_info[first_name]', 'John');
-formData.append('account_info[last_name]', 'Doe');
-// ... other fields
-formData.append('brochure', fileObject);
-```
-
-## CORS Configuration
-
-CORS is configured in `config/cors.php`. By default, it allows:
-
-- `http://localhost:5173` (Vite default)
-- `http://localhost:3000`
-- `http://localhost:8080`
-
-Update `FRONTEND_URL` in `.env` for production.
-
-## File Storage
-
-Brochures are stored in `storage/app/public/brochures/`.
-
-After running `php artisan storage:link`, files are accessible at:
-`http://localhost:8000/storage/brochures/{filename}`
-
-## Testing
-
-```bash
-# Run all tests
-php artisan test
-
-# Run with coverage
-php artisan test --coverage
-```
-
-## License
-
-This project is proprietary software for Manila FAME.
+The frontend submits all registration data as `multipart/form-data` in a single POST request. Field names are nested using bracket notation (`account_info[first_name]`) which Laravel parses into arrays automatically.
