@@ -14,7 +14,7 @@ Laravel API backend for the Manila FAME 2026 multi-step event registration syste
 - Composer
 - MySQL 8.0+
 - Laravel CLI (optional)
-- Frontend Vue app (see [Frontend README](../multi-step-registration-ui/README.md))
+- Frontend Vue app (see [manila-fame-registration-ui](https://github.com/lance-pallesco/manila-fame-registration-ui))
 
 ## Getting Started
 
